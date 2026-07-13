@@ -1,0 +1,5 @@
+{
+  "name": "DeadManProtocol",
+  "version": "1.0.0",
+  "description": "Shared ESP-NOW protocol (payload struct, packet types, encryption keys) for the DeadManSwitch transmitter and receiver."
+}

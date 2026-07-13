@@ -1,28 +1,28 @@
-# DeadManSwitchReceiver — Receiver / Relay Controller
+# DeadManSwitchReceiver: Receiver
 
-Receiver half of a proof-of-concept **wheelchair dead-man's switch**. It listens for ESP-NOW telemetry from the handheld transmitter (`../DeadManSwitch`) and drives a relay in the chair's enable path. **Fail-safe by construction**: the relay is energized only while the link is alive *and* the transmitter reports its switch held. Anything else — release, radio loss, transmitter death, this board rebooting or hanging — de-energizes the relay and the chair stops.
+Receiver half of a proof-of-concept wireless Dead Man's Switch. It listens for ESP-NOW telemetry from the handheld transmitter (`../DeadManSwitch`) and drives a relay that allows movement. The relay is energized only while the link between the Transmitter and Receiver is alive *and* the transmitter reports its switch held. Anything else from release, radio loss, transmitter death, this board rebooting or hanging, and it de-energizes the relay and the movement stops.
 
 ## Hardware
 
 - **Board**: DFRobot FireBeetle ESP32 (`firebeetle32`)
-- **DFRobot motor shield** (I2C `0x18`): channel **M1** at 100% PWM acts as the switch for the **12 V relay coil**. De-energized coil = chair disabled. A missing shield is detected at boot and the relay becomes a no-op (fail-safe).
-- **Development bypass button** between GPIO 27 and GND — see below.
+- **DFRobot motor shield** (I2C `0x18`): channel **M1** at 100% PWM acts as the switch for the **12 V relay coil**. De-energized coil = movement disabled. A missing shield is detected at boot and the relay turns off.
+- **Bypass button** between GPIO 27 and GND. See below.
 
 | GPIO | Function |
 |---|---|
-| 27 | Dev bypass button (INPUT_PULLUP, active-LOW) |
+| 27 | Bypass button (INPUT_PULLUP, active-LOW) |
 | 21/22 | I2C to motor shield (relay coil driver) |
 
 ## Source layout
 
 | File | Contents |
 |---|---|
-| `src/main.cpp` | `setup()` + `loop()` only: boot order, bypass handling, 500 ms link timeout, channel scanning, the single relay decision |
+| `src/main.cpp` | `setup()` + `loop()` only: boot order, bypass handling, 500 ms link timeout, channel scanning, relay state switching |
 | `src/Relay.cpp/.h` | Relay shield driver, `relayInit()`/`relaySetActive()`, bypass button debounce |
 | `src/Wireless.cpp/.h` | Paired transmitter MAC, ESP-NOW init + encrypted peer, receive callback (auth guards + per-packet-type handlers), channel-table NVS storage, stats |
 | `src/State.h` | `ReceiverState` enum (SEARCHING / WORKING / CALIBRATING) |
 | `src/Cli.cpp/.h` | Serial CLI |
-| `../common/DeadManProtocol/Protocol.h` | **Shared with the transmitter**: payload struct, packet types, encryption keys, channel count. Edit ⇒ reflash BOTH devices. |
+| `../common/DeadManProtocol/Protocol.h` | **Shared with the transmitter**: payload struct, packet types, encryption keys, channel count. If you Edit, reflash BOTH devices. |
 
 ## Build & flash
 
@@ -40,18 +40,20 @@ This receiver only obeys **one** transmitter, identified by MAC and encrypted wi
 2. Set `transmitterMacAddress` in `src/Wireless.cpp` to that address.
 3. Flash this receiver.
 
-While the MAC is unset (all zeros) the receiver rejects every packet and prints a loud `[AUTH]` warning at boot — the relay can never energize.
+While the MAC is unset (all zeros) the receiver rejects every packet and prints a `[AUTH]` warning at boot and the relay can never energize.
 
-## Safety mechanisms (know these before modifying)
+MAC also visible in the 'status' command through serial comms.
 
-- **500 ms link watchdog**: no accepted packet for 500 ms ⇒ relay off, resume channel scan.
-- **Task watchdog (3 s)**: if `loop()` ever hangs, the chip panics, resets, and boots with the relay de-energized. Armed at the end of `setup()`, fed at the top of `loop()` — keep that ordering.
-- **Auth guards** in the receive callback, in order: sender-MAC filter → frame-length check → replay guard (monotonic packet counter; re-baselines only from SEARCHING). Rejections are counted in `status`.
-- **Single relay owner**: only the last line of `loop()` and the timeout/bypass paths call `relaySetActive()`. The radio callback records intent only — never add blocking I2C to it.
+## Safety mechanisms
+
+- No accepted packet for 500 ms and the relay is turned off, resume channel scan.
+- If `loop()` ever hangs, the chip resets, and boots with the relay de-energized. Armed at the end of `setup()`, fed at the top of `loop()` Shouldn't change that ordering ordering.
+- In the receive callback, in order: sender-MAC filter > frame-length check > replay guard. Rejections are counted in `status`.
+- Only the last line of `loop()` and the timeout/bypass paths call `relaySetActive()`.
 
 ## Development bypass (GPIO 27)
 
-Holding the hidden chassis button forces the relay ACTIVE and suspends link checks, so the robot can be worked on without someone holding the transmitter. **It intentionally defeats the dead-man's switch** — it exists for bench/debug work by the other teams, and must never be reachable by the seated user.
+Turning on the button forces the relay ACTIVE and suspends link checks, so the robot can be worked on without someone holding the transmitter. **It intentionally defeats the dead-man's switch** and exists for bench/debug work.
 
 ## CLI (115200 baud)
 
@@ -61,4 +63,3 @@ Holding the hidden chassis button forces the relay ACTIVE and suspends link chec
 | `reset` / `deletetable` | Clear the calibrated channel table from NVS and resume scanning |
 | `reboot` | Restart the board |
 
-Full architecture, timing contract, and safety review: see `../DeadManSwitch Technical Note.md`.

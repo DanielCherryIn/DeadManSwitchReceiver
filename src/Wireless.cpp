@@ -7,14 +7,15 @@
 // The ONLY transmitter this relay obeys. Read the address from the transmitter's
 // boot log ("[BOOT] Transmitter MAC ...") or its CLI `status`, and fill it in here.
 // While left at all-zeros, EVERY packet is rejected and the relay can never
-// energize (fail-safe), so the link is down until this is set.
+// energize, so the link is down until this is set.
 const uint8_t transmitterMacAddress[6] = {0x24,0x6F,0x28,0xF6,0xDA,0x90};
 
 // ESP-NOW encryption keys (espNowPmk/espNowLmk) come from the shared Protocol.h.
 
+
 // Wireless Data Structures
 // PacketType and PayloadData come from the shared Protocol.h (../common), so the
-// layout can no longer drift from the transmitter's.
+// layout can't drift from the transmitter's.
 
 PayloadData receiverData;
 
@@ -31,17 +32,18 @@ volatile ReceiverState systemState = STATE_SEARCHING;
 volatile uint8_t currentChannel = 1;
 volatile unsigned long lastPacketReceivedTime = 0;
 const unsigned long TimeoutMs = 500;
-// Cross-device timing contract: this watchdog MUST stay shorter than the
+
+// This watchdog MUST stay shorter than the
 // transmitter's CALIB_DISCONNECT_WAIT_MS (1000ms, in its Diagnostics.cpp), so that
-// during a calibration sweep the transmitter can starve us long enough for this
-// timeout to fire and return us to scanning before it tests the next channel.
+// during a calibration sweep the transmitter can starve just long enough for this
+// timeout to fire and return to scanning before it tests the next channel.
 
 // True while the development bypass button is held (forces the relay ACTIVE).
 // Written from loop(), read from the ESP-NOW receive callback, hence volatile.
 volatile bool bypassActive = false;
 
-// Last dead-man switch intent received from the transmitter (telemetry). The radio
-// callback only records intent here; loop() owns the blocking I2C relay actuation.
+// Last dead-man switch state received from the transmitter (telemetry). The radio
+// callback only records state here.
 volatile bool txSwitchActive = false;
 
 // Scanning variables for the system.
@@ -66,9 +68,9 @@ volatile bool lastSwitchState = false;
 // Auth rejections: frames dropped by the sender-MAC filter or the replay guard.
 volatile uint32_t statsPacketsRejected = 0;
 
-// Replay guard baseline. The transmitter's payloadPacketCounter is global and
-// monotonic across ALL packet types, so any accepted packet must carry a higher
-// counter than the last one -- except when we are (re)syncing from SEARCHING,
+// Replay guard baseline. The transmitter's payloadPacketCounter is global
+// across ALL packet types, so any accepted packet must carry a higher
+// counter than the last one, except when we are (re)syncing from SEARCHING,
 // which is the only state a rebooted transmitter (counter reset to 0) can reach
 // us from, since its multi-second boot always trips our 500ms link timeout first.
 volatile uint32_t lastAcceptedCounter = 0;
@@ -126,7 +128,7 @@ static void handleTelemetryPacket() {
   }
 
   // Count drops only across a continuous telemetry stream. A zero baseline means
-  // we just (re)synced -- after calibration, a channel hop, or a reconnect -- so
+  // we just (re)synced after calibration, a channel hop, or a reconnect so
   // adopt the new counter without charging the gap as drops. (The transmitter's
   // packet counter is global and monotonic across every channel it probes, so an
   // un-gated diff would spike the drop count by hundreds.)
