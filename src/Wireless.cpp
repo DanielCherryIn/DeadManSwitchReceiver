@@ -3,6 +3,9 @@
 #include <WiFi.h>
 #include "esp_wifi.h"
 
+// comment next line out when you don't need to debug
+//#define DEBUG_WIRELESS 1
+
 // Link authentication.
 // The ONLY transmitter this relay obeys. Read the address from the transmitter's
 // boot log ("[BOOT] Transmitter MAC ...") or its CLI `status`, and fill it in here.
@@ -82,7 +85,9 @@ void updateReceiverChannel(uint8_t channel) {
 
 // Case 1: Received calibration hierarchy table from transmitter
 static void handleCalibTablePacket() {
-  Serial.println("\n[CALIB] Calibration Table Received from Transmitter.");
+  #ifdef DEBUG_WIRELESS
+    Serial.println("\n[CALIB] Calibration Table Received from Transmitter.");
+  #endif
 
   // Validate every entry is a legal channel (1-13) before trusting the table.
   // ESP-NOW already CRCs the frame, but this is cheap defense in depth so a bad
@@ -95,9 +100,7 @@ static void handleCalibTablePacket() {
     }
   }
 
-  if (!tableValid) {
-    Serial.println("[CALIB] Rejected: table contains an out-of-range channel. Continuing scan.");
-  } else {
+  if (tableValid) {
     // Save rankings to NVS flash memory
     preferences.begin(radioConfigNamespace, false);
     preferences.putBytes(channelTableStorageKey, receiverData.rankedChannels, channelTableSize);
@@ -114,8 +117,15 @@ static void handleCalibTablePacket() {
     systemState = STATE_WORKING;
     lastPacketReceivedTime = millis();
     expectedPacketCounter = 0; // Reset tracking on new channel
-    Serial.printf("[CALIB] Table saved. Hopped to Best Channel: %u\n", bestChannel);
+    #ifdef DEBUG_WIRELESS
+      Serial.printf("[CALIB] Table saved. Hopped to Best Channel: %u\n", bestChannel);
+    #endif
   }
+  #ifdef DEBUG_WIRELESS
+    else {
+      Serial.println("[CALIB] Rejected: table contains an out-of-range channel. Continuing scan.");
+    }
+  #endif
 }
 
 // Case 2: Received Telemetry
@@ -124,7 +134,9 @@ static void handleTelemetryPacket() {
   if (systemState == STATE_SEARCHING) {
     systemState = STATE_WORKING;
     expectedPacketCounter = 0; // Reset tracking
-    Serial.printf("\n[SCAN] Scan completed. Connected on Channel %u for telemetry.\n", currentChannel);
+    #ifdef DEBUG_WIRELESS
+      Serial.printf("\n[SCAN] Scan completed. Connected on Channel %u for telemetry.\n", currentChannel);
+    #endif
   }
 
   // Count drops only across a continuous telemetry stream. A zero baseline means
@@ -141,10 +153,12 @@ static void handleTelemetryPacket() {
 
   // Log Switch State transitions
   if (receiverData.payloadIsSwitchActive != lastSwitchState) {
-    Serial.printf("\n[RELAY] Switch state change: %s -> %s (Relay %s)\n",
-                  lastSwitchState ? "ACTIVE" : "INACTIVE",
-                  receiverData.payloadIsSwitchActive ? "ACTIVE" : "INACTIVE",
-                  receiverData.payloadIsSwitchActive ? "HIGH" : "LOW");
+    #ifdef DEBUG_WIRELESS
+      Serial.printf("\n[RELAY] Switch state change: %s -> %s (Relay %s)\n",
+                    lastSwitchState ? "ACTIVE" : "INACTIVE",
+                    receiverData.payloadIsSwitchActive ? "ACTIVE" : "INACTIVE",
+                    receiverData.payloadIsSwitchActive ? "HIGH" : "LOW");
+    #endif
     lastSwitchState = receiverData.payloadIsSwitchActive;
   }
 
@@ -161,7 +175,9 @@ static void handleCalibBeaconPacket() {
 
   if (systemState != STATE_CALIBRATING) {
     systemState = STATE_CALIBRATING;
-    Serial.printf("\n[SCAN] Scan completed. Calibrating on Channel %u\n", receiverData.targetChannel);
+    #ifdef DEBUG_WIRELESS
+      Serial.printf("\n[SCAN] Scan completed. Calibrating on Channel %u\n", receiverData.targetChannel);
+    #endif
   }
 
   // Force the channel to the correct on in case of adjacency interference.
@@ -228,7 +244,9 @@ bool wirelessInit() {
   esp_wifi_set_ps(WIFI_PS_NONE);
 
   if (esp_now_init() != ESP_OK) {
-    Serial.println("[Fault] ESP-NOW initialization failed.");
+    #ifdef DEBUG_WIRELESS
+      Serial.println("[Fault] ESP-NOW initialization failed.");
+    #endif
     return false;
   }
 
@@ -245,17 +263,24 @@ bool wirelessInit() {
     transmitterPeerInfo.channel = 0; // 0 = follow whatever channel we are on (we hop while scanning)
     transmitterPeerInfo.encrypt = true;
     memcpy(transmitterPeerInfo.lmk, espNowLmk, 16);
-    if (esp_now_add_peer(&transmitterPeerInfo) != ESP_OK) {
-      Serial.println("[Fault] Failed to register transmitter as encrypted peer.");
+
+    esp_err_t res = esp_now_add_peer(&transmitterPeerInfo);
+    #ifdef DEBUG_WIRELESS
+      if (res != ESP_OK) {
+        Serial.println("[Fault] Failed to register transmitter as encrypted peer.");
+      }
+    #endif
+  } 
+  #ifdef DEBUG_WIRELESS
+    else {
+      Serial.println("*************************************************************");
+      Serial.println("[AUTH] transmitterMacAddress is NOT SET (all zeros).");
+      Serial.println("[AUTH] All packets will be REJECTED and the relay stays off.");
+      Serial.println("[AUTH] Read the MAC from the transmitter's boot log and set it");
+      Serial.println("[AUTH] in main.cpp (transmitterMacAddress), then reflash.");
+      Serial.println("*************************************************************");
     }
-  } else {
-    Serial.println("*************************************************************");
-    Serial.println("[AUTH] transmitterMacAddress is NOT SET (all zeros).");
-    Serial.println("[AUTH] All packets will be REJECTED and the relay stays off.");
-    Serial.println("[AUTH] Read the MAC from the transmitter's boot log and set it");
-    Serial.println("[AUTH] in main.cpp (transmitterMacAddress), then reflash.");
-    Serial.println("*************************************************************");
-  }
+  #endif
 
   // Bind receive callback
   esp_now_register_recv_cb(onDataReceivedCallback);
@@ -277,14 +302,18 @@ bool wirelessInit() {
     updateReceiverChannel(currentChannel);
     systemState = STATE_WORKING;
     lastPacketReceivedTime = millis();
-    Serial.printf("[STORAGE] Channel Table loaded. Working Channel: %u\n", currentChannel);
+    #ifdef DEBUG_WIRELESS
+      Serial.printf("[STORAGE] Channel Table loaded. Working Channel: %u\n", currentChannel);
+    #endif
   } else {
     // Start searching the spectrum from channel 1
     currentChannel = 1;
     updateReceiverChannel(currentChannel);
     systemState = STATE_SEARCHING;
     lastChannelSwitchTime = millis();
-    Serial.println("[STORAGE] Channel Table missing. Starting auto-scan...");
+    #ifdef DEBUG_WIRELESS
+      Serial.println("[STORAGE] Channel Table missing. Starting auto-scan...");
+    #endif
   }
 
   return true;

@@ -2,6 +2,9 @@
 #include <Wire.h>
 #include <DFRobot_MotorStepper.h>
 
+// comment next line out when you don't need to debug
+//#define DEBUG_RELAY 1
+
 // Pins and Hardware config.
 
 // Relay output, driven for real through a DFRobot motor shield used as a makeshift
@@ -56,7 +59,9 @@ void relayInit() {
   Wire.beginTransmission(RELAY_SHIELD_ADDR);
   if (Wire.endTransmission() != 0) {
     relayHardwarePresent = false;
-    Serial.printf("[RELAY] Motor shield NOT found at 0x%02X. Relay output disabled.\n", RELAY_SHIELD_ADDR);
+    #ifdef DEBUG_RELAY
+      Serial.printf("[RELAY] Motor shield NOT found at 0x%02X. Relay output disabled.\n", RELAY_SHIELD_ADDR);
+    #endif
     return;
   }
   relayDriver.init();
@@ -64,7 +69,9 @@ void relayInit() {
   relayDriver.stop();                // boot de-energized
   relayHardwarePresent = true;
   relayActiveState = false;
-  Serial.printf("[RELAY] Motor shield found at 0x%02X. Relay ready at 100%% drive.\n", RELAY_SHIELD_ADDR);
+  #ifdef DEBUG_RELAY
+    Serial.printf("[RELAY] Motor shield found at 0x%02X. Relay ready at 100%% drive.\n", RELAY_SHIELD_ADDR);
+  #endif
 }
 
 // Energize / de-energize the relay. Edge-triggered: only touches the I2C bus when the

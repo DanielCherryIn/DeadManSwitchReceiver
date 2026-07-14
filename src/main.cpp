@@ -7,6 +7,9 @@
 #include "Wireless.h"
 #include "Cli.h"
 
+// comment next line out when you don't need to debug
+//#define DEBUG 1
+
 // Hang protection: if loop() stalls for this long, the task watchdog panics and
 // hard-resets the chip, and relayInit() then boots the relay de-energized. Without
 // this, a hung MCU leaves the motor shield latched on its last (possibly energized)
@@ -14,12 +17,22 @@
 // (blocking CLI prints ~60ms, NVS writes a few ms).
 const uint32_t loopWatchdogTimeoutSeconds = 3;
 
+// Input pins for monitoring other Emergency activations:
+extern const uint8_t pinEmergButton = 25;
+extern const uint8_t pinEmergBumper = 26;
+
+// Status print vars
+const uint32_t STATUS_PRINT_PERIOD  = 500;
+uint32_t lastStatusPrint = 0;
+
 // SYSTEM INITIALIZATION
 
 void setup() {
   Serial.begin(115200);
   delay(100);
-  Serial.println("\n[BOOT] Booting. . .");
+  #ifdef DEBUG
+    Serial.println("\n[BOOT] Booting. . .");
+  #endif
 
   // I2C bus for the relay motor shield, then bring the relay up de-energized.
   // (relayInit() can block ~2s inside the DFRobot driver when the shield is present.)
@@ -30,6 +43,10 @@ void setup() {
 
   // Development bypass button: internal pull-up, the button pulls the pin to GND.
   pinMode(pinBypassButtonInput, INPUT_PULLUP);
+
+  // Emergency Monitoring inputs, have external pullups. 
+  pinMode(pinEmergButton, INPUT);
+  pinMode(pinEmergBumper, INPUT);
 
   // Bring up WiFi/ESP-NOW, register the encrypted peer + recv callback, and load the
   // saved channel table. Bail on ESP-NOW init failure exactly as the monolith did
@@ -46,7 +63,9 @@ void setup() {
   esp_task_wdt_add(NULL); // watch this task (the Arduino loopTask)
 
   // Print CLI command prompt
-  Serial.print("\n> ");
+  #ifdef DEBUG
+    Serial.print("\n> ");
+  #endif
 }
 
 // SYSTEM MAIN RUNTIME LOOP
@@ -56,10 +75,20 @@ void loop() {
   // return taken while the development bypass is engaged.
   esp_task_wdt_reset();
 
+  // Print diagnostics
+  // TODO - implement serial protocol with start bit and stop bit ('$' and '\n'); DFRobot_MotorStepper.cpp uses prints but shouldnt affect protocol if i only read from start bit to stop bit
+  if (millis() - lastStatusPrint > STATUS_PRINT_PERIOD) {
+    lastStatusPrint = millis();
+    Serial.printf("$ Button: %d | Bumper: %d | DeadmanSw: %d | Bypass: %d\n", digitalRead(pinEmergButton), digitalRead(pinEmergBumper), relayActiveState, getDebouncedBypassState());
+  }
+
   uint32_t now = millis();
 
   // Handle serial CLI inputs and actions asynchronously
-  handleSerialCLI();
+  // temporarily disabled for simpler serial communications above
+  #ifdef DEBUG
+    handleSerialCLI();
+  #endif
 
   // Development bypass: a local button on the receiver that forces the relay
   // ACTIVE regardless of link state or the transmitter's dead-man's switch. Lets
@@ -68,14 +97,16 @@ void loop() {
   bool bypassPressed = getDebouncedBypassState();
   if (bypassPressed != bypassActive) {
     bypassActive = bypassPressed;
-    if (bypassActive) {
-      Serial.println("\n[BYPASS] Engaged. Relay forced ACTIVE, link checks suspended.");
-    } else {
-      // On release we just fall through; the actuation at the end of loop() returns
-      // the relay to normal dead-man control (de-energized unless linked + switched).
-      Serial.println("\n[BYPASS] Released. Relay returned to normal dead-man control.");
-    }
-    Serial.print("> ");
+    #ifdef DEBUG
+      if (bypassActive) {
+        Serial.println("\n[BYPASS] Engaged. Relay forced ACTIVE, link checks suspended.");
+      } else {
+        // On release we just fall through; the actuation at the end of loop() returns
+        // the relay to normal dead-man control (de-energized unless linked + switched).
+        Serial.println("\n[BYPASS] Released. Relay returned to normal dead-man control.");
+      }
+      Serial.print("> ");
+    #endif
   }
 
   if (bypassActive) {
@@ -102,8 +133,10 @@ void loop() {
       systemState = STATE_SEARCHING;
       expectedPacketCounter = 0; // Reset tracking
       lastChannelSwitchTime = nowMs;
-      Serial.printf("\n[Timeout] Connection lost after %dms gap. Relay de-energized. Resuming channel scan...\n", sinceRxMs);
-      Serial.print("> ");
+      #ifdef DEBUG
+        Serial.printf("\n[Timeout] Connection lost after %dms gap. Relay de-energized. Resuming channel scan...\n", sinceRxMs);
+        Serial.print("> ");
+      #endif
     }
   } else {
     //  Channel Sweep Scanning Loop
