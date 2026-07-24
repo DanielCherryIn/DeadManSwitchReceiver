@@ -75,11 +75,16 @@ void loop() {
   // return taken while the development bypass is engaged.
   esp_task_wdt_reset();
 
-  // Print diagnostics
-  // TODO - implement serial protocol with start bit and stop bit ('$' and '\n'); DFRobot_MotorStepper.cpp uses prints but shouldnt affect protocol if i only read from start bit to stop bit
-  if (millis() - lastStatusPrint > STATUS_PRINT_PERIOD) {
+  // Communication protocol: $<button><bumper><deadman><bypass>\n 
+  if (millis() - lastStatusPrint >= STATUS_PRINT_PERIOD) {
     lastStatusPrint = millis();
-    Serial.printf("$ Button: %d | Bumper: %d | DeadmanSw: %d | Bypass: %d\n", digitalRead(pinEmergButton), digitalRead(pinEmergBumper), relayActiveState, getDebouncedBypassState());
+
+    Serial.print('$');
+    Serial.print(!digitalRead(pinEmergButton)); // 1 -> emergency button press
+    Serial.print(!digitalRead(pinEmergBumper)); // 1 -> bumper press
+    Serial.print(!relayActiveState);            // 1 -> deadman's switch not pressed (stop)
+    Serial.print(getDebouncedBypassState());    // 1 -> bypass enabled (deadmans switch state set to 0)
+    Serial.print('\n');
   }
 
   uint32_t now = millis();
